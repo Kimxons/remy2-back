@@ -358,15 +358,13 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     @property
     def current_balance_usd(self):
-        """Converts KES balance to USD for client-side display."""
-        rate = Decimal('130.00') # Define this in settings.py later
-        return (self.current_balance / rate).quantize(Decimal('0.01'))
+        """Returns the stored balance as USD for client-side display."""
+        return Decimal(self.current_balance).quantize(Decimal('0.01'))
 
     @property
     def total_earnings_usd(self):
-        """Converts total KES earnings to USD."""
-        rate = Decimal('130.00')
-        return (self.total_earnings / rate).quantize(Decimal('0.01'))
+        """Returns total earnings in USD."""
+        return Decimal(self.total_earnings).quantize(Decimal('0.01'))
 
     @property
     def is_suspended(self):
@@ -500,26 +498,15 @@ class FreelancerProfile(models.Model):
     @property
     def display_avg_price_usd(self):
         """
-        Calculates a display price in USD.
-        Uses hourly_rate or historical earnings, with a $50 floor.
+        Calculates a display price in USD from stored USD amounts.
         """
-        from django.conf import settings
-        # Default to 130.00 if KES_USD_EXCHANGE_RATE isn't in settings
-        rate = getattr(settings, 'KES_USD_EXCHANGE_RATE', Decimal('130.00'))
-        # MINIMUM_DISPLAY = Decimal('50.00')
-
-        # 1. Use manual hourly_rate if set
         if self.hourly_rate and self.hourly_rate > 0:
-            converted = (self.hourly_rate / rate).quantize(Decimal('0.01'))
-            return converted
+            return Decimal(self.hourly_rate).quantize(Decimal('0.01'))
 
-        # 2. Otherwise calculate based on history (earnings / jobs)
         if self.completed_jobs > 0 and self.user.total_earnings > 0:
-            avg_kes = self.user.total_earnings / self.completed_jobs
-            converted = (avg_kes / rate).quantize(Decimal('0.01'))
-            return converted
+            average_earnings = self.user.total_earnings / self.completed_jobs
+            return Decimal(average_earnings).quantize(Decimal('0.01'))
 
-        # 3. Fallback for new profiles
         return Decimal('0.00')
 
     def update_payout_preference(self, preference, **kwargs):

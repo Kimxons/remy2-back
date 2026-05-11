@@ -68,10 +68,10 @@ class Payout(models.Model):
         related_name="initiated_payouts",
     )
 
-    # ---- Constants & Exchange ----
-    EXCHANGE_RATE = Decimal("110.00")  
-    MARKET_SPREAD = Decimal("25.00") # Put it here!
-    MINIMUM_PAYOUT_KES = Decimal("1000.00")
+    # ---- Currency defaults ----
+    EXCHANGE_RATE = Decimal("1.00")
+    MARKET_SPREAD = Decimal("0.00")
+    MINIMUM_PAYOUT_USD = Decimal("10.00")
 
     # NEW: Better to store the rate used for this specific transaction
     # in case rates change in the future.
@@ -86,7 +86,7 @@ class Payout(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True
     )
 
-    currency = models.CharField(max_length=3, default="KES", editable=False)
+    currency = models.CharField(max_length=3, default="USD", editable=False)
 
     usd_amount = models.DecimalField(
         max_digits=10,
@@ -174,25 +174,16 @@ class Payout(models.Model):
     # Validation
     # =========================
     def clean(self):
-        # 1. Determine the dynamic rate using your class constant
-        if self.market_rate_at_request:
-            self.applied_rate = self.market_rate_at_request - self.MARKET_SPREAD
-        else:
-            # Fallback to baseline (110)
-            self.applied_rate = self.EXCHANGE_RATE
+        self.applied_rate = self.EXCHANGE_RATE
 
-        # 2. Calculate payout amount
         if self.usd_amount:
-            self.payout_amount = (
-                self.usd_amount * self.applied_rate
-            ).quantize(Decimal("0.01"))
+            self.payout_amount = self.usd_amount.quantize(Decimal("0.01"))
 
-        # 3. Minimum payout validation
-        if self.payout_amount and self.payout_amount < self.MINIMUM_PAYOUT_KES:
+        if self.payout_amount and self.payout_amount < self.MINIMUM_PAYOUT_USD:
             raise ValidationError({
                 "usd_amount": (
-                    f"At {self.applied_rate} KES/$, this equals "
-                    f"{self.payout_amount} KES. Minimum is {self.MINIMUM_PAYOUT_KES} KES."
+                    f"This payout equals ${self.payout_amount}. "
+                    f"Minimum is ${self.MINIMUM_PAYOUT_USD}."
                 )
             })
 
@@ -206,16 +197,10 @@ class Payout(models.Model):
 
         if not self.reference:
             self.reference = f"PAY-{str(self.id).split('-')[0].upper()}"
-
-
-        # FIX: Use self.MARKET_SPREAD instead of hardcoding 25.00 again
-        if self.market_rate_at_request:
-            self.applied_rate = self.market_rate_at_request - self.MARKET_SPREAD
-        else:
-            self.applied_rate = self.EXCHANGE_RATE
+        self.applied_rate = self.EXCHANGE_RATE
 
         if self.usd_amount:
-            self.payout_amount = (self.usd_amount * self.applied_rate).quantize(Decimal("0.01"))
+            self.payout_amount = self.usd_amount.quantize(Decimal("0.01"))
 
         self.full_clean()
         super().save(*args, **kwargs)
@@ -265,7 +250,7 @@ class Payout(models.Model):
     def __str__(self):
         return (
             f"Payout {self.reference} "
-            f"(${self.usd_amount} → {self.payout_amount} KES)"
+            f"(${self.usd_amount} USD)"
         )
 
     class Meta:

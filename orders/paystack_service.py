@@ -36,25 +36,7 @@ class PaystackService:
             data["_currency_used"] = currency
             return response, data
 
-        def _should_fallback(resp, result):
-            message = str(result.get("message", "")).lower()
-            return (
-                (resp is not None and resp.status_code == 403)
-                or "currency" in message
-                or "unsupported" in message
-            )
-
-        resp, result = _attempt("USD")
-        if result.get("status"):
-            return result
-
-        if _should_fallback(resp, result):
-            logger.warning(f"USD Paystack init failed for {reference}; retrying with KES.")
-            _, retry_result = _attempt("KES")
-            if retry_result.get("status"):
-                return retry_result
-            return retry_result
-
+        _, result = _attempt("USD")
         return result
 
     def verify_transaction(self, reference):

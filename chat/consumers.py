@@ -123,16 +123,8 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
 
         self.session = self.scope.get("session")
 
-        query_params = parse_qs(self.scope.get("query_string", b"").decode())
-        url_session_key = query_params.get("session_key", [None])[0]
-
-        # Guests authenticate websocket access with the explicit query param.
-        self.session_key = url_session_key
-
-        if self.is_authenticated:
-            if self.session and getattr(self.session, "session_key", None):
-                self.session_key = self.session.session_key
-        elif not self.session_key and self.session and getattr(self.session, "session_key", None):
+        self.session_key = None
+        if self.session and getattr(self.session, "session_key", None):
             self.session_key = self.session.session_key
          
         # Extract route parameters
@@ -404,7 +396,8 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             sender=self.user if self.is_authenticated else None,
             message_text=message,
             is_offer=is_offer,
-            offer_data=offer_data
+            offer_data=offer_data,
+            guest_session_key=None if self.is_authenticated else self.session_key,
         )
     
     @database_sync_to_async

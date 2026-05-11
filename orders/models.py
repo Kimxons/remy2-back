@@ -88,6 +88,8 @@ class Job(models.Model):
     allowed_reviews = models.PositiveIntegerField(default=2)
     reviews_used = models.PositiveIntegerField(default=0)
     completed_at = models.DateTimeField(null=True, blank=True)
+    work_started_at = models.DateTimeField(null=True, blank=True)
+    delivery_due_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=50, choices=JobStatus.choices, default=JobStatus.PROVISIONAL)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.urls import path, re_path, include
 from django.shortcuts import redirect
+from django.http import HttpResponseRedirect
+from urllib.parse import urlencode
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.conf.urls.static import static
 from django.conf import settings
@@ -19,6 +21,47 @@ from user_module.views import (
 admin.site.site_header = "RemyInk!"
 admin.site.site_title = "Job Matching"
 admin.site.index_title = "Welcome to the Freelancer Marketplace"
+
+
+def payment_verify_redirect(request):
+    frontend_base = str(getattr(settings, 'FRONTEND_URL', '') or '').strip().rstrip('/')
+    target_base = frontend_base or 'http://localhost:3000'
+
+    query = {}
+    reference = (request.GET.get('reference') or request.GET.get('trxref') or '').strip()
+    trxref = (request.GET.get('trxref') or '').strip()
+    payment_email = ''
+
+    if reference:
+        try:
+            from payment_gateway.models import Payment
+
+            payment = Payment.objects.select_related('user', 'job__client').filter(
+                reference=reference
+            ).first()
+            if payment:
+                payment_email = (
+                    getattr(payment.user, 'email', None)
+                    or getattr(getattr(payment, 'job', None), 'client', None).email
+                ) or ''
+        except Exception:
+            payment_email = ''
+
+    if reference:
+        query['reference'] = reference
+    if trxref and trxref != reference:
+        query['trxref'] = trxref
+    if payment_email:
+        query['email'] = payment_email
+
+    query['payment'] = 'verified'
+    query['role'] = 'CLIENT'
+
+    destination = f"{target_base}/login"
+    if query:
+        destination = f"{destination}?{urlencode(query)}"
+
+    return HttpResponseRedirect(destination)
 
 urlpatterns = [
     # path('', lambda request: redirect('http://localhost:5173')),
@@ -42,6 +85,7 @@ urlpatterns = [
     path('api/jobs/', include('jobs.urls')),
     path('api/payment/', include('pay_freelancer.urls')),
     path('api/payments/', include('payment_gateway.urls')),
+    path('payment/verify', payment_verify_redirect, name='payment-verify-redirect'),
     
     
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

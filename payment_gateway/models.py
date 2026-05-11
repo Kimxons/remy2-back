@@ -105,10 +105,8 @@ class Payment(models.Model):
             'updated_at'
         ])
 
-        from orders.models import JobStatus
-        self.job.status = JobStatus.PAID
-        self.job.paystack_status = 'success'
-        self.job.save(update_fields=['status', 'paystack_status', 'updated_at'])
+        from orders.workflow import activate_job_after_payment
+        activate_job_after_payment(self.job, gateway_status='success')
 
         return True
 

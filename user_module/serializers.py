@@ -336,6 +336,17 @@ class ClientAccountFinalizeSerializer(serializers.Serializer):
     @transaction.atomic
     def save(self):
         user = self.context['request'].user
+        guest_session_keys = set(GuestSession.objects.filter(
+            shadow_client=user
+        ).values_list('session_key', flat=True))
+
+        guest_session_keys.update(
+            ChatThread.objects.filter(
+                client=user,
+                guest_session_key__isnull=False,
+            ).exclude(guest_session_key='').values_list('guest_session_key', flat=True)
+        )
+
         user.email = self.validated_data['email']
         user.set_password(self.validated_data['password'])
         user.is_active = True
@@ -348,45 +359,15 @@ class ClientAccountFinalizeSerializer(serializers.Serializer):
             import logging
             logger = logging.getLogger(__name__)
 
-            # Find guest session by looking at threads linked to this shadow client
-            # Shadow clients have email format: client###.{hex}.{session[:8]}.shadow
-            if user.email and '.shadow' in str(user.email):
-                # Extract session key from email
-                email_parts = str(user.email).split('.')
-                if len(email_parts) >= 4:
-                    session_prefix = email_parts[-2]  # Get session[:8] part
-
-                    # Find matching guest session
-                    guest_sessions = GuestSession.objects.filter(
-                        session_key__startswith=session_prefix,
-                        converted_to_user__isnull=True
-                    )
-
-                    for guest_session in guest_sessions:
-                        # Link threads for this guest session (if not already linked)
-                        linked_count = ChatThreadService.link_guest_threads_to_client(
-                            client=user,
-                            guest_session_key=guest_session.session_key
-                        )
-                        if linked_count > 0:
-                            logger.info(f"Automatically linked {linked_count} guest threads to finalized client {user.username}")
-
-            # Also check threads that already have this client linked
-            # (they may have been linked when guest sent first message)
-            threads_to_update = ChatThread.objects.filter(
-                client=user,
-                guest_session_key__isnull=False
-            )
-
-            for thread in threads_to_update:
-                # Mark the guest session as converted if it exists
-                try:
-                    guest_session = GuestSession.objects.get(session_key=thread.guest_session_key)
-                    if not guest_session.converted_to_user:
-                        guest_session.mark_converted(user)
-                        logger.info(f"Marked guest session {thread.guest_session_key[:8]}... as converted to {user.username}")
-                except GuestSession.DoesNotExist:
-                    pass
+            for guest_session_key in guest_session_keys:
+                linked_count = ChatThreadService.link_guest_threads_to_client(
+                    client=user,
+                    guest_session_key=guest_session_key,
+                )
+                logger.info(
+                    f"Synchronized guest session {guest_session_key[:8]}... to finalized client "
+                    f"{user.username}; linked_count={linked_count}"
+                )
 
         except Exception as e:
             import logging
@@ -723,7 +704,11 @@ class JobSerializer(serializers.ModelSerializer):
         return 0
 
     def get_deadline(self, obj):
-        return obj.delivery_time_days
+        if getattr(obj, 'delivery_due_at', None):
+            return obj.delivery_due_at
+        if getattr(obj, 'work_started_at', None) and obj.delivery_time_days:
+            return obj.work_started_at + timedelta(days=int(obj.delivery_time_days))
+        return None
 
     def get_chat_thread_id(self, obj):
         thread = ChatThread.objects.filter(

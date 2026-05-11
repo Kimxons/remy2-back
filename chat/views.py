@@ -44,10 +44,7 @@ class EmptySerializer(serializers.Serializer):
 
 class SessionKeyMixin:
     def get_session_key(self, request):
-        return (
-            getattr(request.session, 'session_key', None)
-            or request.query_params.get('session_key')
-        )
+        return getattr(request.session, 'session_key', None)
 
     def ensure_session_key(self, request):
         if not request.session.session_key:
@@ -78,10 +75,7 @@ class IsThreadParticipant(BasePermission):
             return False
 
         user = getattr(request, 'user', None)
-        session_key = (
-            getattr(request.session, 'session_key', None)
-            or request.query_params.get('session_key')
-        )
+        session_key = getattr(request.session, 'session_key', None)
 
         if user and user.is_authenticated:
             if thread.client == user or thread.freelancer == user:
@@ -99,7 +93,6 @@ class IsThreadParticipant(BasePermission):
 
         if session_key:
             if str(thread.guest_session_key).strip() == str(session_key).strip():
-                request.session['manual_guest_key'] = session_key
                 return True
 
         return False
@@ -109,7 +102,10 @@ class IsThreadParticipant(BasePermission):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def guest_threads(request):
-    session_key = request.query_params.get('session_key')
+    if not request.session.session_key:
+        request.session.save()
+
+    session_key = request.session.session_key
     if not session_key:
         return Response(
             {'error': 'Session key is required.'},
@@ -166,10 +162,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         if user.is_authenticated:
             return base_qs.filter(Q(client=user) | Q(freelancer=user))
 
-        session_key = (
-            getattr(self.request.session, 'session_key', None)
-            or self.request.query_params.get('session_key')
-        )
+        session_key = getattr(self.request.session, 'session_key', None)
 
         if session_key:
             return base_qs.filter(guest_session_key=str(session_key).strip())
@@ -178,7 +171,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         thread = self.get_object()
-        session_key = getattr(request.session, 'session_key', None) or request.query_params.get('session_key')
+        session_key = getattr(request.session, 'session_key', None)
 
         is_participant = False
         if request.user.is_authenticated:
@@ -227,11 +220,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
             raise ValidationError({'error': 'Target user is not a freelancer.'})
 
         if not request.user.is_authenticated:
-            if not request.session.session_key:
-                request.session.save()
-            django_session_key = request.session.session_key.strip()
-            client_session_key = request.query_params.get('session_key') or request.data.get('session_key')
-            guest_session_key = str(client_session_key).strip() if client_session_key else django_session_key
+            guest_session_key = self.ensure_session_key(request).strip()
 
             if other_user_username == 'anonymoususer':
                 raise ValidationError({'other_user_username': 'Cannot chat with an anonymous user.'})
@@ -368,7 +357,7 @@ class ChatThreadViewSet(viewsets.ModelViewSet):
         thread = get_thread_or_404(thread_id)
         
         # Manually verify permissions since this ViewSet lacks the helper method
-        session_key = request.query_params.get('session_key') or getattr(request.session, 'session_key', None)
+        session_key = getattr(request.session, 'session_key', None)
         is_participant = False
 
         if request.user.is_authenticated:
@@ -404,13 +393,7 @@ class GuestThreadCreateView(APIView, SessionKeyMixin):
 
     def post(self, request):
         freelancer_username = request.data.get('freelancer_username')
-        client_session_key = request.data.get('session_key')
-
-        if not request.session.session_key:
-            request.session.save()
-        django_session_key = request.session.session_key.strip()
-
-        definitive_guest_key = client_session_key if client_session_key else django_session_key
+        definitive_guest_key = self.ensure_session_key(request).strip()
 
         if not freelancer_username:
             return Response(

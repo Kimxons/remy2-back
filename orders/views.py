@@ -23,6 +23,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 from .models import Job, JobStatus, Dispute
 from .serializers import JobSerializer, JobCreateSerializer, JobSubmissionSerializer, DisputeSerializer
 from .paystack_service import PaystackService
+from .workflow import activate_job_after_payment
 from .throttles import OrdersAnonRateThrottle, OrdersUserRateThrottle
 from user_module.models import Role, Rating, GuestSession as ShadowGuestSession
 
@@ -442,7 +443,7 @@ class PaystackWebhookView(APIView):
             logger.warning(f"Job not found for reference: {reference}")
             return Response(status=status.HTTP_200_OK)
 
-        if event_type == 'charge.success' and job.status == JobStatus.PAID:
+        if event_type == 'charge.success' and str(job.paystack_status or '').lower() == 'success':
             return Response(status=status.HTTP_200_OK)
 
         try:
@@ -453,11 +454,9 @@ class PaystackWebhookView(APIView):
                     if (verification_response and verification_response.get('status') and
                         verification_response['data']['status'] == 'success' and
                         verification_response['data']['amount'] == int(job.total_amount * 100)):
-                        job.status = JobStatus.PAID
-                        job.paystack_status = event['data'].get('status')
-                        job.save()
+                        activate_job_after_payment(job, gateway_status=event['data'].get('status') or 'success')
                         _finalize_shadow_client_after_payment(job, verification_response.get('data') or {})
-                        logger.info(f"Job {job.id} updated to PAID via Webhook. Ref: {reference}")
+                        logger.info(f"Job {job.id} updated to IN_PROGRESS via Webhook. Ref: {reference}")
                     else:
                         logger.error(f"Job {job.id}: Webhook success but verification failed.")
                 elif event_type in ['charge.failed', 'transaction.abandoned']:
@@ -519,9 +518,10 @@ class JobViewSet(viewsets.ModelViewSet):
         expected_amount = int(job.total_amount * 100)
 
         update_fields = []
-        if gateway_status == 'success' and gateway_amount == expected_amount and job.status != JobStatus.PAID:
-            job.status = JobStatus.PAID
-            update_fields.append('status')
+        payment_activated = False
+        if gateway_status == 'success' and gateway_amount == expected_amount and job.status != JobStatus.IN_PROGRESS:
+            activate_job_after_payment(job, gateway_status=data.get('status') or 'success')
+            payment_activated = True
         elif gateway_status in ['failed', 'abandoned', 'reversed'] and job.status != JobStatus.PAYMENT_FAILED:
             job.status = JobStatus.PAYMENT_FAILED
             update_fields.append('status')
@@ -533,8 +533,10 @@ class JobViewSet(viewsets.ModelViewSet):
 
         if update_fields:
             job.save(update_fields=update_fields)
-            if job.status == JobStatus.PAID:
-                _finalize_shadow_client_after_payment(job, data)
+        if payment_activated:
+            _finalize_shadow_client_after_payment(job, data)
+
+        if update_fields or payment_activated:
             logger.info(
                 f"Refreshed payment status for Job {job.id} via verify. "
                 f"Status={job.status}, Ref={job.paystack_reference}"
@@ -583,11 +585,11 @@ class JobViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         job = self.get_object()
         job = self._refresh_payment_status(job)
-        if job.status == JobStatus.PAID and job.client and not job.client.is_active and _is_guest_linked_client(job.client):
+        if job.status == JobStatus.IN_PROGRESS and job.client and not job.client.is_active and _is_guest_linked_client(job.client):
             _finalize_shadow_client_after_payment(job)
             job.refresh_from_db()
         data = self.get_serializer(job).data
-        if job.status == JobStatus.PAID and not (request.user and request.user.is_authenticated):
+        if job.status == JobStatus.IN_PROGRESS and not (request.user and request.user.is_authenticated):
             if job.client and job.client.is_active and job.client.has_usable_password():
                 data['post_payment'] = {
                     'next': 'login',
@@ -731,9 +733,9 @@ class JobViewSet(viewsets.ModelViewSet):
         job = self.get_object()
         if request.user != job.freelancer:
             raise PermissionDenied("Only the assigned freelancer can submit this job.")
-        if job.status not in [JobStatus.IN_PROGRESS, JobStatus.DISPUTE_OPEN]:
+        if job.status not in [JobStatus.PAID, JobStatus.ASSIGNED, JobStatus.IN_PROGRESS, JobStatus.DISPUTE_OPEN]:
             raise ValidationError(
-                f"Job can only be submitted from In Progress or Dispute Open. Current status: {job.get_status_display()}."
+                f"Delivery can only be submitted after payment is confirmed or during an open dispute. Current status: {job.get_status_display()}."
             )
         if job.status == JobStatus.DISPUTE_OPEN and int(job.reviews_used or 0) >= int(job.allowed_reviews or 0):
             raise ValidationError({'detail': 'No review rounds remaining for this order.'})

@@ -26,7 +26,7 @@ def initiate_paystack_transfer_task(self, payout_id):
     try:
         api_response = initiate_transfer(
             recipient_code=payout.recipient_code,
-            amount_ngn=float(payout.payout_amount),
+            amount_usd=float(payout.payout_amount),
         )
         
         PayoutLog.objects.create(

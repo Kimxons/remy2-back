@@ -42,7 +42,7 @@ class PaystackService:
 
         Args:
             email: Customer email
-            amount: Amount in kobo (multiply by 100 from naira/shillings)
+            amount: Amount in USD
             reference: Unique payment reference
             callback_url: URL to redirect after payment
             metadata: Additional metadata for the transaction
@@ -52,7 +52,7 @@ class PaystackService:
         """
         url = f"{self.BASE_URL}/transaction/initialize"
 
-        # Convert amount to kobo (Paystack expects amount in lowest currency unit)
+        # Convert amount to cents because Paystack expects the lowest currency unit.
         amount_in_kobo = int(Decimal(amount) * 100)
 
         def _attempt(currency):
@@ -100,23 +100,7 @@ class PaystackService:
                 'data': response_data
             }
 
-        def _should_fallback(resp, result):
-            message = str(result.get('message', '')).lower()
-            return (
-                (resp is not None and resp.status_code == 403)
-                or 'currency' in message
-                or 'unsupported' in message
-            )
-
-        resp, result = _attempt('USD')
-        if result.get('success'):
-            return result
-
-        if _should_fallback(resp, result):
-            logger.warning(f"USD payment init failed for {reference}; retrying with KES.")
-            _, retry_result = _attempt('KES')
-            return retry_result
-
+        _, result = _attempt('USD')
         return result
 
     def verify_payment(self, reference):

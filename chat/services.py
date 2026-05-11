@@ -8,9 +8,9 @@ from django.utils import timezone
 from django.core.cache import cache
 from django.db.models import Q, Prefetch
 from django.core.exceptions import PermissionDenied
-from .models import ChatThread, ChatMessage, MessageReadStatus, ChatAttachment
+from .models import ChatThread, ChatMessage, MessageReadStatus, ChatAttachment, GuestSession as ChatGuestSession
 from .constants import OfferStatus, GUEST_DISPLAY_NAME_PREFIX, GUEST_DISPLAY_COUNTER_KEY
-from user_module.models import Role, GuestSession  
+from user_module.models import Role, GuestSession as UserGuestSession
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -231,7 +231,7 @@ class ChatMessageService:
         guest_session = None
         if not sender and guest_session_key:
             try:
-                guest_session, _ = GuestSession.objects.get_or_create(session_key=guest_session_key)
+                guest_session, _ = ChatGuestSession.get_or_create_session(guest_session_key)
             except Exception as e:
                 logger.warning(f"Could not link guest session to message: {e}")        
         if is_offer:
@@ -469,10 +469,8 @@ class GuestNameService:
             return "Guest"
 
         try:
-            # Consistently import from user_module
-            from user_module.models import GuestSession
-            session, _ = GuestSession.objects.get_or_create(session_key=session_key)
-            return getattr(session, 'display_name', "Guest")
+            session, _ = ChatGuestSession.get_or_create_session(session_key)
+            return session.display_name
         except Exception as e:
             logger.error(f"Error getting guest display name: {e}")
             
@@ -490,8 +488,18 @@ class GuestNameService:
     @staticmethod
     def get_or_create_guest_session(session_key: str, **kwargs):
         try:
-            from user_module.models import GuestSession
-            return GuestSession.objects.get_or_create(session_key=session_key)
+            chat_session, chat_created = ChatGuestSession.get_or_create_session(
+                session_key,
+                user_agent=kwargs.get('user_agent'),
+                ip_address=kwargs.get('ip_address'),
+                referrer=kwargs.get('referrer'),
+            )
+            user_session, user_created = UserGuestSession.objects.get_or_create(session_key=session_key)
+
+            if user_session.shadow_client and not chat_session.converted_to_user:
+                chat_session.mark_converted(user_session.shadow_client)
+
+            return user_session, (chat_created or user_created)
         except Exception as e:
             logger.error(f"Error creating guest session: {e}")
             raise
@@ -501,14 +509,15 @@ class GuestNameService:
     def mark_session_converted(session_key: str, user: User):
         """Link a guest session to a newly registered user account."""
         try:
-            from user_module.models import GuestSession
-            session = GuestSession.objects.get(session_key=session_key)
-            
-            # Using the logic from your user_module
-            session.shadow_client = user
-            session.is_converted = True
-            session.save()
-            
+            chat_session, _ = ChatGuestSession.get_or_create_session(session_key)
+            if chat_session.converted_to_user_id != user.id:
+                chat_session.mark_converted(user)
+
+            user_session, _ = UserGuestSession.objects.get_or_create(session_key=session_key)
+            if user_session.shadow_client_id != user.id:
+                user_session.shadow_client = user
+                user_session.save(update_fields=['shadow_client'])
+
             logger.info(f"Marked session {session_key[:8]}... converted to {user.username}")
-        except GuestSession.DoesNotExist:
-            logger.warning(f"Non-existent session {session_key[:8]}...")
+        except Exception as exc:
+            logger.warning(f"Failed to mark session {session_key[:8]}... converted: {exc}")

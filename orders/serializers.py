@@ -100,6 +100,8 @@ class JobSerializer(serializers.ModelSerializer):
     reviews_remaining = serializers.SerializerMethodField()
     submission = JobSubmissionReadSerializer(read_only=True)
     dispute = serializers.SerializerMethodField()
+    work_started_at = serializers.DateTimeField(read_only=True)
+    delivery_due_at = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = Job
@@ -110,6 +112,7 @@ class JobSerializer(serializers.ModelSerializer):
             'category_name', 'subject_name', 'price', 'total_amount',
             'allowed_reviews', 'reviews_used', 'reviews_remaining',
             'status', 'status_display', 'created_at', 'updated_at', 
+            'work_started_at', 'delivery_due_at',
             'paystack_reference', 'paystack_authorization_url', 'paystack_status',
             'client_marked_complete_at',
             'submission',

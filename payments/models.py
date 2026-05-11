@@ -17,10 +17,6 @@ from django.contrib.contenttypes.models import ContentType
 
 
 class Currency(models.TextChoices):
-    NGN = 'NGN', 'Nigerian Naira'
-    KES = 'KES', 'Kenyan Shilling'
-    GHS = 'GHS', 'Ghanaian Cedi'
-    ZAR = 'ZAR', 'South African Rand'
     USD = 'USD', 'US Dollar'
 
 
@@ -122,10 +118,6 @@ class DisputeReason(models.TextChoices):
 
 
 CURRENCY_CONFIG = {
-    'NGN': {'symbol': '₦', 'decimals': 2, 'min_amount': Decimal('100'), 'country': 'nigeria'},
-    'KES': {'symbol': 'KSh', 'decimals': 2, 'min_amount': Decimal('100'), 'country': 'kenya'},
-    'GHS': {'symbol': 'GH₵', 'decimals': 2, 'min_amount': Decimal('10'), 'country': 'ghana'},
-    'ZAR': {'symbol': 'R', 'decimals': 2, 'min_amount': Decimal('50'), 'country': 'south_africa'},
     'USD': {'symbol': '$', 'decimals': 2, 'min_amount': Decimal('5'), 'country': 'international'},
 }
 
@@ -231,7 +223,7 @@ class WalletManager(models.Manager):
         return WalletQuerySet(self.model, using=self._db)
 
     def get_or_create_for_user(self, user, currency: str = None):
-        currency = currency or getattr(settings, 'DEFAULT_CURRENCY', Currency.KES)
+        currency = currency or getattr(settings, 'DEFAULT_CURRENCY', Currency.USD)
         wallet, created = self.get_or_create(
             user=user,
             currency=currency,
@@ -258,7 +250,7 @@ class Wallet(BaseModel):
         on_delete=models.PROTECT,
         related_name='wallets'
     )
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     balance = models.DecimalField(
         max_digits=18,
         decimal_places=2,
@@ -723,7 +715,7 @@ class PaystackPayment(BaseModel, AuditMixin):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='paystack_payments')
     reference = models.CharField(max_length=100, unique=True, default=generate_reference, db_index=True)
     amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(Decimal('1'))])
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     email = models.EmailField()
     status = models.CharField(max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.INITIALIZED)
     payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPE_CHOICES, default='deposit')
@@ -883,7 +875,7 @@ class Escrow(BaseModel):
     client = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='client_escrows')
     freelancer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='freelancer_escrows')
     amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     platform_fee_percentage = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -1085,7 +1077,7 @@ class Order(BaseModel, AuditMixin):
     title = models.CharField(max_length=255)
     description = models.TextField()
     amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     platform_fee_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('10.00'))
     status = models.CharField(max_length=20, choices=OrderStatus.choices, default=OrderStatus.DRAFT, db_index=True)
     delivery_days = models.PositiveIntegerField(default=7, validators=[MinValueValidator(1), MaxValueValidator(365)])
@@ -1256,7 +1248,7 @@ class BankAccount(BaseModel):
     account_number = models.CharField(max_length=20, validators=[RegexValidator(r'^\d{10,20}$', 'Enter a valid account number')])
     account_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=50, blank=True)
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     recipient_code = models.CharField(max_length=100, blank=True, null=True, db_index=True, unique=True)
     is_verified = models.BooleanField(default=False)
     is_primary = models.BooleanField(default=False)
@@ -1363,7 +1355,7 @@ class Payout(BaseModel, AuditMixin):
     amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(Decimal('1'))])
     fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
     net_amount = models.DecimalField(max_digits=18, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     reference = models.CharField(max_length=100, unique=True, default=generate_reference, db_index=True)
     transfer_code = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     transfer_reference = models.CharField(max_length=100, blank=True, null=True)
@@ -1680,7 +1672,7 @@ class PlatformRevenue(BaseModel):
     order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name='platform_revenues', null=True, blank=True)
     escrow = models.ForeignKey(Escrow, on_delete=models.PROTECT, related_name='platform_revenues', null=True, blank=True)
     amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
-    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.KES)
+    currency = models.CharField(max_length=3, choices=Currency.choices, default=Currency.USD)
     fee_type = models.CharField(max_length=50, default='escrow_fee', db_index=True)
     description = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)

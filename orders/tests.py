@@ -269,8 +269,10 @@ class InitializePaystackGuestSessionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.job.refresh_from_db()
-        self.assertEqual(self.job.status, JobStatus.PAID)
-        self.assertEqual(response.data.get('status'), JobStatus.PAID)
+        self.assertEqual(self.job.status, JobStatus.IN_PROGRESS)
+        self.assertEqual(response.data.get('status'), JobStatus.IN_PROGRESS)
+        self.assertIsNotNone(self.job.work_started_at)
+        self.assertIsNotNone(self.job.delivery_due_at)
 
     @patch('orders.views.PaystackService.verify_transaction')
     def test_guest_retrieve_paid_includes_login_redirect_hint(self, mock_verify):
@@ -327,7 +329,7 @@ class InitializePaystackGuestSessionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.client_user.refresh_from_db()
         self.job.refresh_from_db()
-        self.assertEqual(self.job.status, JobStatus.PAID)
+        self.assertEqual(self.job.status, JobStatus.IN_PROGRESS)
         self.assertEqual(self.client_user.email, 'guestclient@example.com')
         self.assertTrue(self.client_user.is_active)
         self.assertTrue(self.client_user.has_usable_password())
@@ -376,6 +378,22 @@ class JobSubmissionDeliveryTests(TestCase):
         self.job.refresh_from_db()
         self.assertEqual(self.job.status, JobStatus.DELIVERED)
         self.assertEqual(self.job.submission.submission_text, 'Delivered final draft. Please review.')
+
+    def test_freelancer_can_submit_directly_after_payment(self):
+        self.client_api.force_authenticate(user=self.freelancer)
+        self.job.status = JobStatus.PAID
+        self.job.save(update_fields=['status'])
+
+        response = self.client_api.post(
+            f'/api/orders/jobs/{self.job.id}/submit/',
+            {'submission_text': 'Payment confirmed. Delivering completed work.'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, JobStatus.DELIVERED)
+        self.assertEqual(self.job.submission.submission_text, 'Payment confirmed. Delivering completed work.')
 
     def test_freelancer_can_submit_with_attachments(self):
         self.client_api.force_authenticate(user=self.freelancer)
@@ -824,16 +842,12 @@ class PaystackServiceCurrencyTests(SimpleTestCase):
         self.assertEqual(kwargs['json']['currency'], 'USD')
 
     @patch('orders.paystack_service.requests.post')
-    def test_initialize_transaction_falls_back_to_kes_on_usd_forbidden(self, mock_post):
+    def test_initialize_transaction_does_not_fall_back_to_kes_on_usd_forbidden(self, mock_post):
         usd_resp = type('Resp', (), {})()
         usd_resp.status_code = 403
         usd_resp.json = lambda: {'status': False, 'message': 'Currency not supported'}
 
-        kes_resp = type('Resp', (), {})()
-        kes_resp.status_code = 200
-        kes_resp.json = lambda: {'status': True, 'data': {'authorization_url': 'https://paystack.test/kes'}}
-
-        mock_post.side_effect = [usd_resp, kes_resp]
+        mock_post.return_value = usd_resp
 
         service = PaystackService()
         result = service.initialize_transaction(
@@ -843,8 +857,6 @@ class PaystackServiceCurrencyTests(SimpleTestCase):
             metadata={'job_id': '1'},
         )
 
-        self.assertTrue(result.get('status'))
-        first_currency = mock_post.call_args_list[0].kwargs['json']['currency']
-        second_currency = mock_post.call_args_list[1].kwargs['json']['currency']
-        self.assertEqual(first_currency, 'USD')
-        self.assertEqual(second_currency, 'KES')
+        self.assertFalse(result.get('status'))
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertEqual(mock_post.call_args.kwargs['json']['currency'], 'USD')

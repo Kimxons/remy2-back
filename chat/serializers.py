@@ -130,7 +130,7 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 
         # 2. If guest, check session key and ensure they aren't the freelancer
         # (This identifies the message as coming from the guest/client side)
-        session_key = request.query_params.get('session_key') or getattr(request.session, 'session_key', None)
+        session_key = getattr(request.session, 'session_key', None)
         
         if session_key and str(obj.thread.guest_session_key) == str(session_key):
             return obj.sender is None
@@ -323,7 +323,7 @@ class ChatThreadListSerializer(serializers.ModelSerializer):
     
     @staticmethod
     def _get_session_key(request) -> Optional[str]:
-        return getattr(request.session, 'session_key', None) or request.query_params.get('session_key')
+        return getattr(request.session, 'session_key', None)
 
 
 class ChatThreadDetailSerializer(ChatThreadListSerializer):

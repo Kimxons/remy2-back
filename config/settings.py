@@ -27,6 +27,15 @@ DEBUG = env.bool('DEBUG', default=False)
 ENVIRONMENT = env('ENVIRONMENT', default='production').lower()
 IS_PRODUCTION = ENVIRONMENT == 'production'
 
+FRONTEND_URL = env(
+    'FRONTEND_URL',
+    default='https://remyink.co.ke' if IS_PRODUCTION else 'http://localhost:3000'
+)
+BACKEND_BASE_URL = env(
+    'BACKEND_BASE_URL',
+    default='https://api.remyink.co.ke' if IS_PRODUCTION else 'http://127.0.0.1:8000'
+)
+
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
 if IS_PRODUCTION and not ALLOWED_HOSTS:
@@ -46,10 +55,15 @@ PAYSTACK_WEBHOOK_SECRET = env('PAYSTACK_WEBHOOK_SECRET')
 PAYSTACK_INITIALIZE_URL = 'https://api.paystack.co/transaction/initialize'
 PAYSTACK_VERIFY_URL = 'https://api.paystack.co/transaction/verify/'
 
-SESSION_COOKIE_DOMAIN = ".remyink.co.ke"
+SESSION_COOKIE_DOMAIN = env(
+    'SESSION_COOKIE_DOMAIN',
+    default='.remyink.co.ke' if IS_PRODUCTION else None,
+)
 
 CLIENT_FEE_PERCENTAGE = 0.20
 FREELANCER_PAYOUT_PERCENTAGE = 0.80
+DEFAULT_CURRENCY = 'USD'
+DEFAULT_CURRENCY_SYMBOL = '$'
 
 # -----------------------------
 # JWT
@@ -316,6 +330,6 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # -----------------------------
-# Exchange rate
+# Currency defaults
 # -----------------------------
-KES_USD_EXCHANGE_RATE = Decimal('130.00')
+USD_EXCHANGE_RATE = Decimal('1.00')

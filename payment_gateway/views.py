@@ -2,7 +2,6 @@ from rest_framework import status, viewsets, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.utils import timezone  # <--- Add this
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.conf import settings
@@ -17,8 +16,7 @@ from .serializers import (
     PaymentStatusSerializer,
     PaymentWebhookLogSerializer
 )
-# FIXED: Using the specific filename we found in your VS Code
-from payments.paystack_service import PaystackService
+from .services import PaystackService
 
 from orders.models import Job, JobStatus
 
@@ -78,32 +76,47 @@ class InitializePaymentView(APIView):
                     user_agent=request.META.get("HTTP_USER_AGENT", ""),
                 )
 
-            # FIXED: Calling the correct method name found in your Service class
-            response = paystack.initialize_transaction(
+            result = paystack.initialize_payment(
                 email=email,
                 amount=job.total_amount,
                 reference=payment.reference,
-                currency="USD",  # <--- YOU MUST ADD THIS LINE
+                callback_url=callback_url,
                 metadata={
                     "job_id": str(job.id),
                     "actor_type": actor["type"],
                     "payment_id": str(payment.id),
-                    "callback_url": callback_url
                 }
             )
 
-            if not response or not response.get("status"):
-                raise ValueError(
-                    response.get("message", "Paystack initialization failed")
-                    if response else "No response from Paystack"
+            if not result.get("success"):
+                payment.status = PaymentStatus.FAILED
+                payment.paystack_response = result.get("data") or {"message": result.get("message")}
+                payment.save(update_fields=["status", "paystack_response", "updated_at"])
+
+                detail = result.get("message", "Payment initialization failed")
+                status_code = (
+                    status.HTTP_502_BAD_GATEWAY
+                    if str(detail).lower().startswith("network error")
+                    else status.HTTP_400_BAD_REQUEST
+                )
+                return Response(
+                    {"error": "Payment initialization failed", "detail": detail},
+                    status=status_code
                 )
 
-            data = response.get("data", {})
+            data = result.get("data", {})
 
             payment.authorization_url = data.get("authorization_url")
             payment.access_code = data.get("access_code")
-            payment.paystack_response = response
-            payment.save()
+            payment.currency = data.get("_currency_used") or payment.currency
+            payment.paystack_response = data
+            payment.save(update_fields=[
+                "authorization_url",
+                "access_code",
+                "currency",
+                "paystack_response",
+                "updated_at",
+            ])
 
             # Update Job Status Safely
             job.status = JobStatus.PENDING_PAYMENT
@@ -124,7 +137,7 @@ class InitializePaymentView(APIView):
         except Exception as e:
             logger.error(f"Payment initialization failed: {str(e)}", exc_info=True)
             return Response(
-                {"error": "Payment initialization failed", "detail": str(e)},
+                {"error": "Unexpected error during payment setup."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -161,8 +174,7 @@ class VerifyPaymentView(APIView):
         paystack = PaystackService()
 
         try:
-            # FIXED: Updated to match service method name 'verify_transaction'
-            result = paystack.verify_transaction(payment.reference)
+            result = paystack.verify_payment(payment.reference)
 
             if result and result.get("status"):
                 with transaction.atomic():

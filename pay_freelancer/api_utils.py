@@ -15,15 +15,15 @@ def get_paystack_headers():
         "Content-Type": "application/json",
     }
 
-def initiate_transfer(recipient_code, amount_ngn, reference=None):
+def initiate_transfer(recipient_code, amount_usd, reference=None):
     url = "https://api.paystack.co/transfer"
     
-    amount_kobo = int(float(amount_ngn) * 100)
+    amount_cents = int(float(amount_usd) * 100)
     
     payload = {
         "source": "balance",
         "reason": "Freelancer Payout",
-        "amount": amount_kobo,
+        "amount": amount_cents,
         "recipient": recipient_code,
         "reference": reference
     }
@@ -110,7 +110,7 @@ def create_transfer_recipient(name, account_number, bank_code, type="nuban"):
         "name": name,
         "account_number": account_number,
         "bank_code": bank_code,
-        "currency": "NGN"
+        "currency": "USD"
     }
     
     try:
@@ -153,15 +153,15 @@ def process_payout(payout, user=None):
         if not payout.recipient_code:
             raise ValueError("Recipient code is required")
         
-        if payout.payout_amount < payout.MINIMUM_PAYOUT:
-            raise ValueError(f"Payout amount {payout.payout_amount} is below minimum {payout.MINIMUM_PAYOUT}")
+        if payout.payout_amount < payout.MINIMUM_PAYOUT_USD:
+            raise ValueError(f"Payout amount {payout.payout_amount} is below minimum {payout.MINIMUM_PAYOUT_USD}")
         
         if payout.freelancer.current_balance < payout.payout_amount:
             raise ValueError(f"Insufficient balance. Available: {payout.freelancer.current_balance}, Required: {payout.payout_amount}")
         
         response = initiate_transfer(
             recipient_code=payout.recipient_code,
-            amount_ngn=float(payout.payout_amount),
+            amount_usd=float(payout.payout_amount),
             reference=payout.reference
         )
         
