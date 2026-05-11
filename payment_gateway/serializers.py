@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema_field
 
 from .models import Payment, PaymentStatus, PaymentWebhookLog
 from orders.models import Job, JobStatus
@@ -71,11 +72,13 @@ class PaymentSerializer(serializers.ModelSerializer):
             "verified_at", "paid_at",
             "created_at", "updated_at"
         ]
-        read_only_fields = fields
+        read_only_fields = tuple(fields)
 
+    @extend_schema_field(serializers.EmailField(allow_null=True))
     def get_user_email(self, obj):
         return obj.user.email if obj.user else getattr(obj, "guest_email", None)
 
+    @extend_schema_field(serializers.CharField())
     def get_username(self, obj):
         return obj.user.username if obj.user else "Guest"
 
@@ -185,7 +188,16 @@ class PaymentWebhookLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentWebhookLog
         fields = "__all__"
-        read_only_fields = fields
+        read_only_fields = (
+            "id",
+            "event_type",
+            "reference",
+            "payload",
+            "payment",
+            "processed",
+            "processing_error",
+            "created_at",
+        )
 
 
 # =============================

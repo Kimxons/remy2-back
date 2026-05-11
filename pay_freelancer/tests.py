@@ -1,13 +1,43 @@
-import json
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.test import SimpleTestCase, TestCase, override_settings
 
-from pay_freelancer.api_utils import create_transfer_recipient
+from pay_freelancer.api_utils import create_transfer_recipient, get_paystack_headers, initiate_transfer
 from pay_freelancer.models import Payout
 from user_module.models import User
+
+
+class PaystackConfigurationTests(SimpleTestCase):
+	@override_settings(PAYSTACK_SECRET_KEY='paystack_live_secret')
+	def test_get_paystack_headers_uses_configured_secret_key(self):
+		headers = get_paystack_headers()
+
+		self.assertEqual(headers['Authorization'], 'Bearer paystack_live_secret')
+		self.assertEqual(headers['Content-Type'], 'application/json')
+
+	@override_settings(PAYSTACK_SECRET_KEY='')
+	def test_get_paystack_headers_requires_secret_key(self):
+		with self.assertRaises(ImproperlyConfigured):
+			get_paystack_headers()
+
+
+class PaystackTransferRequestTests(SimpleTestCase):
+	@override_settings(PAYSTACK_SECRET_KEY='paystack_live_secret')
+	@patch('pay_freelancer.api_utils.requests.post')
+	def test_initiate_transfer_uses_minor_units_and_timeout(self, mock_post):
+		response = mock_post.return_value
+		response.raise_for_status.return_value = None
+		response.json.return_value = {'status': True, 'data': {'transfer_code': 'TRF_123'}}
+
+		initiate_transfer('RCP_test', Decimal('10.015'), reference='PAYOUT-REF-1')
+
+		kwargs = mock_post.call_args.kwargs
+		self.assertEqual(kwargs['json']['amount'], 1002)
+		self.assertEqual(kwargs['json']['reference'], 'PAYOUT-REF-1')
+		self.assertEqual(kwargs['timeout'], 30)
+		self.assertEqual(kwargs['headers']['Authorization'], 'Bearer paystack_live_secret')
 
 
 class PayoutCurrencyTests(TestCase):
@@ -58,6 +88,7 @@ class PayoutCurrencyTests(TestCase):
 
 
 class PaystackRecipientCurrencyTests(TestCase):
+	@override_settings(PAYSTACK_SECRET_KEY='paystack_live_secret')
 	@patch('pay_freelancer.api_utils.requests.post')
 	def test_create_transfer_recipient_uses_usd_currency(self, mock_post):
 		response = mock_post.return_value
@@ -66,5 +97,6 @@ class PaystackRecipientCurrencyTests(TestCase):
 
 		create_transfer_recipient('Freelancer', '1234567890', '001')
 
-		payload = json.loads(mock_post.call_args.kwargs['data'])
-		self.assertEqual(payload['currency'], 'USD')
+		kwargs = mock_post.call_args.kwargs
+		self.assertEqual(kwargs['json']['currency'], 'USD')
+		self.assertEqual(kwargs['timeout'], 30)

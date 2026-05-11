@@ -1,11 +1,34 @@
 import requests
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _get_paystack_timeout():
+    return int(getattr(settings, 'PAYSTACK_REQUEST_TIMEOUT', 30))
+
+
+def _to_minor_units(amount):
+    try:
+        normalized_amount = Decimal(str(amount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid payout amount: {amount}") from exc
+
+    return int(normalized_amount * 100)
+
+
+def _response_json(response, fallback_message):
+    try:
+        return response.json()
+    except ValueError:
+        return {
+            "status": False,
+            "message": getattr(response, 'text', '') or fallback_message,
+        }
 
 def get_paystack_headers():
     if not settings.PAYSTACK_SECRET_KEY:
@@ -17,8 +40,8 @@ def get_paystack_headers():
 
 def initiate_transfer(recipient_code, amount_usd, reference=None):
     url = "https://api.paystack.co/transfer"
-    
-    amount_cents = int(float(amount_usd) * 100)
+
+    amount_cents = _to_minor_units(amount_usd)
     
     payload = {
         "source": "balance",
@@ -29,40 +52,54 @@ def initiate_transfer(recipient_code, amount_usd, reference=None):
     }
 
     try:
-        response = requests.post(url, headers=get_paystack_headers(), data=json.dumps(payload))
+        response = requests.post(
+            url,
+            headers=get_paystack_headers(),
+            json=payload,
+            timeout=_get_paystack_timeout(),
+        )
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack transfer response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error initiating transfer: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error initiating transfer: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack transfer request failed")
     except Exception as e:
         logger.error(f"Error initiating Paystack transfer: {e}")
         return {"status": False, "message": str(e)}
 
 def verify_transfer(transfer_code):
     url = f"https://api.paystack.co/transfer/verify/{transfer_code}"
-    
+
     try:
-        response = requests.get(url, headers=get_paystack_headers())
+        response = requests.get(url, headers=get_paystack_headers(), timeout=_get_paystack_timeout())
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack verify response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error verifying transfer: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error verifying transfer: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack verify request failed")
     except Exception as e:
         logger.error(f"Error verifying Paystack transfer: {e}")
         return {"status": False, "message": str(e)}
 
 def get_transfer_status(transfer_code):
     url = f"https://api.paystack.co/transfer/{transfer_code}"
-    
+
     try:
-        response = requests.get(url, headers=get_paystack_headers())
+        response = requests.get(url, headers=get_paystack_headers(), timeout=_get_paystack_timeout())
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack status response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error getting transfer status: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error getting transfer status: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack status request failed")
     except Exception as e:
         logger.error(f"Error getting Paystack transfer status: {e}")
         return {"status": False, "message": str(e)}
@@ -76,35 +113,46 @@ def list_transfers(per_page=50, page=1, status=None):
     
     if status:
         params["status"] = status
-    
+
     try:
-        response = requests.get(url, headers=get_paystack_headers(), params=params)
+        response = requests.get(
+            url,
+            headers=get_paystack_headers(),
+            params=params,
+            timeout=_get_paystack_timeout(),
+        )
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack list response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error listing transfers: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error listing transfers: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack list request failed")
     except Exception as e:
         logger.error(f"Error listing Paystack transfers: {e}")
         return {"status": False, "message": str(e)}
 
 def get_balance():
     url = "https://api.paystack.co/balance"
-    
+
     try:
-        response = requests.get(url, headers=get_paystack_headers())
+        response = requests.get(url, headers=get_paystack_headers(), timeout=_get_paystack_timeout())
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack balance response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error getting balance: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error getting balance: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack balance request failed")
     except Exception as e:
         logger.error(f"Error getting Paystack balance: {e}")
         return {"status": False, "message": str(e)}
 
 def create_transfer_recipient(name, account_number, bank_code, type="nuban"):
     url = "https://api.paystack.co/transferrecipient"
-    
+
     payload = {
         "type": type,
         "name": name,
@@ -112,33 +160,49 @@ def create_transfer_recipient(name, account_number, bank_code, type="nuban"):
         "bank_code": bank_code,
         "currency": "USD"
     }
-    
+
     try:
-        response = requests.post(url, headers=get_paystack_headers(), data=json.dumps(payload))
+        response = requests.post(
+            url,
+            headers=get_paystack_headers(),
+            json=payload,
+            timeout=_get_paystack_timeout(),
+        )
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack recipient response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error creating recipient: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error creating recipient: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack recipient request failed")
     except Exception as e:
         logger.error(f"Error creating Paystack recipient: {e}")
         return {"status": False, "message": str(e)}
 
 def finalize_transfer(transfer_code, otp):
     url = f"https://api.paystack.co/transfer/finalize_transfer"
-    
+
     payload = {
         "transfer_code": transfer_code,
         "otp": otp
     }
-    
+
     try:
-        response = requests.post(url, headers=get_paystack_headers(), data=json.dumps(payload))
+        response = requests.post(
+            url,
+            headers=get_paystack_headers(),
+            json=payload,
+            timeout=_get_paystack_timeout(),
+        )
         response.raise_for_status()
-        return response.json()
+        return _response_json(response, "Paystack finalize response was not valid JSON")
     except requests.exceptions.HTTPError as e:
-        logger.error(f"Paystack HTTP Error finalizing transfer: {e.response.text}")
-        return e.response.json()
+        response = e.response
+        logger.error(f"Paystack HTTP Error finalizing transfer: {getattr(response, 'text', str(e))}")
+        if response is None:
+            return {"status": False, "message": str(e)}
+        return _response_json(response, "Paystack finalize request failed")
     except Exception as e:
         logger.error(f"Error finalizing Paystack transfer: {e}")
         return {"status": False, "message": str(e)}

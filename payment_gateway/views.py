@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.conf import settings
 import logging
 import json
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from .models import Payment, PaymentWebhookLog, PaymentStatus
 from .serializers import (
@@ -31,6 +32,40 @@ class EmptySerializer(serializers.Serializer):
 class InitializePaymentView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=PaymentInitializeSerializer,
+        responses={
+            200: inline_serializer(
+                name='PaymentInitializeResumeResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'payment': PaymentSerializer(),
+                    'authorization_url': serializers.URLField(allow_null=True),
+                    'reference': serializers.CharField(),
+                },
+            ),
+            201: inline_serializer(
+                name='PaymentInitializeResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'payment': PaymentSerializer(),
+                    'authorization_url': serializers.URLField(allow_null=True),
+                    'reference': serializers.CharField(),
+                },
+            ),
+            400: inline_serializer(
+                name='PaymentInitializeErrorResponse',
+                fields={
+                    'error': serializers.CharField(),
+                    'detail': serializers.CharField(required=False),
+                },
+            ),
+            500: inline_serializer(
+                name='PaymentInitializeUnexpectedErrorResponse',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request):
         serializer = PaymentInitializeSerializer(
             data=request.data,
@@ -152,6 +187,34 @@ class InitializePaymentView(APIView):
 class VerifyPaymentView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=PaymentVerifySerializer,
+        responses={
+            200: inline_serializer(
+                name='PaymentVerifyResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'payment': PaymentSerializer(),
+                    'job_status': serializers.CharField(required=False),
+                },
+            ),
+            400: inline_serializer(
+                name='PaymentVerifyErrorResponse',
+                fields={'error': serializers.CharField()},
+            ),
+            403: inline_serializer(
+                name='PaymentVerifyUnauthorizedResponse',
+                fields={'error': serializers.CharField()},
+            ),
+            500: inline_serializer(
+                name='PaymentVerifyUnexpectedErrorResponse',
+                fields={
+                    'error': serializers.CharField(),
+                    'detail': serializers.CharField(),
+                },
+            ),
+        },
+    )
     def post(self, request):
         serializer = PaymentVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -207,6 +270,19 @@ class VerifyPaymentView(APIView):
 class PaymentStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses={
+            200: PaymentStatusSerializer,
+            403: inline_serializer(
+                name='PaymentStatusUnauthorizedResponse',
+                fields={'error': serializers.CharField()},
+            ),
+            404: inline_serializer(
+                name='PaymentStatusNotFoundResponse',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def get(self, request, job_id):
         job = get_object_or_404(Job, id=job_id)
 
@@ -234,6 +310,23 @@ class PaymentStatusView(APIView):
 class PaystackWebhookView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        request=EmptySerializer,
+        responses={
+            200: inline_serializer(
+                name='PaystackWebhookResponse',
+                fields={'status': serializers.CharField()},
+            ),
+            400: inline_serializer(
+                name='PaystackWebhookBadRequestResponse',
+                fields={'error': serializers.CharField()},
+            ),
+            500: inline_serializer(
+                name='PaystackWebhookServerErrorResponse',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request):
         try:
             try:
@@ -279,18 +372,27 @@ class PaystackWebhookView(APIView):
 # VIEWSETS
 # =========================
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Payment.objects.none()
     serializer_class = PaymentSerializer
     permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Payment.objects.none()
+        if not getattr(self.request, 'user', None) or not self.request.user.is_authenticated:
+            return Payment.objects.none()
         return Payment.objects.filter(user=self.request.user)
 
 
 class PaymentWebhookLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = PaymentWebhookLog.objects.none()
     serializer_class = PaymentWebhookLogSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return PaymentWebhookLog.objects.none()
         if self.request.user.is_staff:
             return PaymentWebhookLog.objects.all()
         return PaymentWebhookLog.objects.none()

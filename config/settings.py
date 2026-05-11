@@ -27,6 +27,15 @@ DEBUG = env.bool('DEBUG', default=False)
 ENVIRONMENT = env('ENVIRONMENT', default='production').lower()
 IS_PRODUCTION = ENVIRONMENT == 'production'
 
+if IS_PRODUCTION and DEBUG:
+    raise ImproperlyConfigured('DEBUG must be False in production.')
+
+if IS_PRODUCTION and len(set(SECRET_KEY)) < 5:
+    raise ImproperlyConfigured('SECRET_KEY is too weak for production.')
+
+if IS_PRODUCTION and (len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure-')):
+    raise ImproperlyConfigured('SECRET_KEY must be long, random, and production-safe.')
+
 FRONTEND_URL = env(
     'FRONTEND_URL',
     default='https://remyink.co.ke' if IS_PRODUCTION else 'http://localhost:3000'
@@ -41,6 +50,14 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 if IS_PRODUCTION and not ALLOWED_HOSTS:
     raise ImproperlyConfigured('ALLOWED_HOSTS must be set in production.')
 
+
+def _env_first(*keys: str, default=None):
+    for key in keys:
+        value = env(key, default=None)
+        if value not in (None, ''):
+            return value
+    return default
+
 # -----------------------------
 # Paystack
 # -----------------------------
@@ -48,8 +65,20 @@ PAYSTACK_CALLBACK_URL = env(
     'PAYSTACK_CALLBACK_URL',
     default='https://remyink-9gqjd.ondigitalocean.app/payment/verify'
 )
-PAYSTACK_SECRET_KEY = env('PAYSTACK_SECRET_KEY_LIVE')
-PAYSTACK_PUBLIC_KEY = env('PAYSTACK_PUBLIC_KEY_LIVE')
+PAYSTACK_SECRET_KEY = _env_first(
+    'PAYSTACK_SECRET_KEY_LIVE' if IS_PRODUCTION else 'PAYSTACK_SECRET_KEY_TEST',
+    'PAYSTACK_SECRET_KEY',
+    'PAYSTACK_SECRET_KEY_LIVE',
+    'PAYSTACK_SECRET_KEY_TEST',
+    default='',
+)
+PAYSTACK_PUBLIC_KEY = _env_first(
+    'PAYSTACK_PUBLIC_KEY_LIVE' if IS_PRODUCTION else 'PAYSTACK_PUBLIC_KEY_TEST',
+    'PAYSTACK_PUBLIC_KEY',
+    'PAYSTACK_PUBLIC_KEY_LIVE',
+    'PAYSTACK_PUBLIC_KEY_TEST',
+    default='',
+)
 PAYSTACK_WEBHOOK_SECRET = env('PAYSTACK_WEBHOOK_SECRET')
 
 PAYSTACK_INITIALIZE_URL = 'https://api.paystack.co/transaction/initialize'
@@ -59,6 +88,12 @@ SESSION_COOKIE_DOMAIN = env(
     'SESSION_COOKIE_DOMAIN',
     default='.remyink.co.ke' if IS_PRODUCTION else None,
 )
+SESSION_COOKIE_SECURE = env.bool('SESSION_COOKIE_SECURE', default=IS_PRODUCTION)
+CSRF_COOKIE_SECURE = env.bool('CSRF_COOKIE_SECURE', default=IS_PRODUCTION)
+SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=IS_PRODUCTION)
+SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=31536000 if IS_PRODUCTION else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=IS_PRODUCTION)
+SECURE_HSTS_PRELOAD = env.bool('SECURE_HSTS_PRELOAD', default=IS_PRODUCTION)
 
 CLIENT_FEE_PERCENTAGE = 0.20
 FREELANCER_PAYOUT_PERCENTAGE = 0.80

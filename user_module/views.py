@@ -7,7 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.core.mail import send_mail
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, inline_serializer
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Sum, Avg, Count, Exists, OuterRef, F
 from django.middleware.csrf import get_token
@@ -387,7 +387,25 @@ class DashboardStatsView(APIView):
 
 class GuestTokenView(APIView):
     permission_classes = [AllowAny]
+    serializer_class = EmptySerializer
 
+    @extend_schema(
+        request=EmptySerializer,
+        responses={
+            200: inline_serializer(
+                name='GuestTokenResponse',
+                fields={
+                    'refresh': serializers.CharField(),
+                    'access': serializers.CharField(),
+                    'username': serializers.CharField(),
+                },
+            ),
+            500: inline_serializer(
+                name='GuestTokenErrorResponse',
+                fields={'error': serializers.CharField()},
+            ),
+        },
+    )
     def post(self, request):
         try:
             session_key = request.session.session_key
